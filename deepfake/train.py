@@ -5,15 +5,17 @@ import math
 import random
 import datetime 
 import numpy as np
+from prometheus_client import Summary
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
-import torchvision.models as models
 
 from mmcv import Config
+from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import f1_score, accuracy_score
 from deepfake.datasets import Deepfake_datasets, build_dataloader
+from deepfake.utilis import init_model
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train script')
@@ -34,35 +36,23 @@ class Logger(object):
         pass
 
 def set_fixed_seed(cfg_seed):
-        seed = cfg_seed
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+    seed = cfg_seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    np.random.seed(seed)  # Numpy module.
+    random.seed(seed)  # Python random module.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
-def init_model(mode='train', path=None, class_nums=3):
-    if mode == 'train':
-        model = models.resnet18()
-        if path is not None:
-            model.load_state_dict(torch.load(path))
-            print("Complete loading the pretrained model.")
-        model.fc = nn.Linear(in_features=model.fc.in_features, out_features=class_nums)
-    else:
-        model = models.resnet18()
-        model.fc = nn.Linear(in_features=model.fc.in_features, out_features=class_nums)
-        model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(path).items()})
-        print("Complete loading the model. Start evaluation...")
-    return model
 
 def train():
     # init
     args = parse_args()
     cfg = Config.fromfile(args.cfg)
+    writer = SummaryWriter()
     # Some trivial things
     # make checkpoint folder
     if not os.path.exists(cfg.model_save_path):
@@ -76,13 +66,15 @@ def train():
     # define cuda
     print(f"Cuda available devices: {torch.cuda.device_count()}.")
     device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
-    model = init_model(mode='train', path=cfg.pretrained_path)
-    model = nn.DataParallel(model).to(device)
-    # model.to(device)
+    model = init_model(cfg, mode='train', type=cfg.model_type, path=cfg.pretrained_path, writer=writer)
+    if cfg.multi_gpu:
+        model = nn.DataParallel(model).to(device)
+    else:
+        model.to(device)
     # build the dataset
     # transform setting
     transform = transforms.Compose([
-        transforms.Resize((224,224)),
+        transforms.Resize(cfg.img_size),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -96,7 +88,12 @@ def train():
     eval_dataloader = build_dataloader(eval_dataset, batch_size=cfg.batch_size,num_workers=cfg.num_workers)
     # setting configuration
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    optimizer = optim.Adam(
+        filter(lambda p:p.requires_grad, model.parameters()), 
+        lr=cfg.lr, 
+        weight_decay=cfg.weight_decay,
+        betas=cfg.betas
+        )
     # train
     best_f1 = 0.0
     for epoch in range(cfg.epoch_num):
@@ -106,11 +103,15 @@ def train():
             input, label = data[0].to(device), data[1].to(device)
             optimizer.zero_grad()
             output = model(input)
-            loss = criterion(output, label)
+            if type(output) is tuple:
+                stu_fea, stu_cla = output[0], output[1]
+            elif type(output) is torch.Tensor:
+                stu_cla = output
+            loss = criterion(stu_cla, label)
             loss.backward()
             optimizer.step()
             # compute acc, f1, running_loss
-            predict = output.data.cpu().numpy().argsort()[:,-1:].squeeze()
+            predict = stu_cla.data.cpu().numpy().argsort()[:,-1:].squeeze()
             acc += accuracy_score(label.cpu(),predict)
             f1  += f1_score(label.cpu(),predict,average='macro')
             running_loss += loss
@@ -120,6 +121,9 @@ def train():
                 interval_acc  = acc/step
                 interval_f1   = f1/step
                 interval_loss = running_loss
+                writer.add_scalar("Loss/train", running_loss, train_step_len*epoch+i+1)
+                writer.add_scalar("Acc/train", interval_acc, train_step_len*epoch+i+1)
+                writer.add_scalar("F1/train", interval_f1, train_step_len*epoch+i+1)
                 print(f"{datetime.datetime.now()} -Train- Epoch [{epoch+1}][{i+1}/{train_step_len}]: loss:{interval_loss}, acc:{interval_acc}, f1_score:{interval_f1}")
                 acc, f1, running_loss = 0.0, 0.0, 0.0
         # eval when training
@@ -132,7 +136,12 @@ def train():
                 for j, data in enumerate(eval_dataloader):
                     input, label = data[0].to(device), data[1].to(device)
                     output = model(input)
-                    predict = output.data.cpu().numpy().argsort()[:,-1:].squeeze()
+                    if type(output) is tuple:
+                        stu_fea, stu_cla = output[0], output[1]
+                    elif type(output) is torch.Tensor:
+                        stu_cla = output
+                    loss = criterion(stu_cla, label)
+                    predict = stu_cla.data.cpu().numpy().argsort()[:,-1:].squeeze()
                     acc += accuracy_score(label.cpu(),predict)
                     f1  += f1_score(label.cpu(),predict,average='macro')
                     eval_loss += loss
@@ -140,6 +149,7 @@ def train():
             total_batch_step = j + 1
             eval_accuracy = acc/total_batch_step
             eval_f1       = f1/total_batch_step
+            writer.add_scalar("F1/eval", eval_f1, epoch+1)
             print(f"{datetime.datetime.now()} -Eval- Loss:{eval_loss}, acc:{eval_accuracy}, f1_score:{eval_f1}")
             # save the best model
             if eval_f1 > best_f1:
@@ -147,6 +157,7 @@ def train():
                 torch.save(model.state_dict(), best_model)
                 print(f"Now best checkpoint is {best_f1}, saved as {best_model}")
             print("--------------------------------------------------------------------------")
+    writer.flush()
     torch.save(model.state_dict(), latest_model)
     print("Finish train.~")
 
@@ -160,5 +171,5 @@ if __name__=="__main__":
 
 '''
 command take-away note:
-python train.py configs/resnet.py 
+CUDA_VISIBLE_DEVICES=1,2,3 python train.py configs/f3net.py 
 '''

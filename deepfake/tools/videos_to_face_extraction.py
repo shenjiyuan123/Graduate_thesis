@@ -11,7 +11,7 @@ def parse_arg():
     parser.add_argument('mask_folder')
     parser.add_argument('frame_save_path')
     parser.add_argument('mask_save_path')
-    parser.add_argument('--frames_num',default=20)
+    parser.add_argument('--frames_num',default=30)
     args = parser.parse_args()
     return args
 
@@ -41,8 +41,11 @@ def main(args):
             m_video = cv2.VideoCapture(mask_pth)
             # get the random frames
             video_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-            frames_list = random.sample(range(video_frame_count),args.frames_num)
-            frames_list = sorted(frames_list)
+            if video_frame_count < args.frames_num:
+                frames_list = list(range(video_frame_count))
+            else:
+                frames_list = random.sample(range(video_frame_count),args.frames_num)
+                frames_list = sorted(frames_list)
             print(frames_list)
             ret, frame = video.read()
             _,   mask  = m_video.read()
@@ -66,7 +69,7 @@ def main(args):
                     frame_save_pth = os.path.join(args.frame_save_path, str(save_num)+'.png')
                     mask_save_path = os.path.join(args.mask_save_path,  str(save_num)+'.png')
                     cv2.imwrite(frame_save_pth, frame[y:y+height_bbox,x:x+width_bbox,:])
-                    # for the faceswap, modify the mask into binary imgs
+                    # for the DeepFakeDetection, modify the mask into binary imgs
                     mask = 255*(mask[y:y+height_bbox,x:x+width_bbox,:]!=0)
                     cv2.imwrite(mask_save_path, mask)
                     save_num += 1
@@ -84,7 +87,7 @@ if __name__=="__main__":
 '''
 command take-away note:
 python tools/videos_to_face_extraction.py \
-/media/large_storage/Jiyuan_Shen/editable/manipulated_sequences/FaceSwap/c23/videos/ \
-/media/large_storage/Jiyuan_Shen/editable/manipulated_sequences/FaceSwap/masks/videos/ \
-editable/FaceSwap/imgs/ editable/FaceSwap/masks/
+/media/large_storage/Jiyuan_Shen/editable/manipulated_sequences/DeepFakeDetection/c23/videos/ \
+/media/large_storage/Jiyuan_Shen/editable/manipulated_sequences/DeepFakeDetection/masks/videos/ \
+editable/DeepFakeDetection/imgs/ editable/DeepFakeDetection/masks/
 '''
