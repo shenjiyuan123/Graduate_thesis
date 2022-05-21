@@ -8,7 +8,7 @@ Based on the previous research on the use of frequency domain analysis in Deepfa
 ![The first algorithm that based on frequency domain analysis and two-stream network](./figures/chap03_framework.png)
 
 
-## Algorithm that based on multi-model graft attention network
+## Algorithm based on multi-model graft attention network
 
 
 ![The second algorithm that based on multi-model graft attention network](./figures/chap04_framework2.png)
