@@ -20,3 +20,24 @@ Based on the previous research on the use of frequency domain analysis in Deepfa
 ## Visualize the feature map
 
 ![](./figures/chap03_visual.png)
+
+## How to use…
+
+### Single task mode
+
+```shell
+python train.py configs/f3net.py                 # train by algorithm 1
+python eval.py configs/resnet.py --out out.json  # eval by algorithm 1
+python train.py configs/graftnet.py              # train by algorithm 2
+python eval.py configs/graftnet.py               # train by algorithm 2
+```
+
+### Multi-task mode
+
+```shell
+python multi_task_train.py configs/f3net_seg.py  							  	# train by algorithm 1
+python multi_task_eval.py configs/f3net_seg.py --out out.json   	# eval by algorithm 1
+python multi_task_train.py configs/graftnet_seg.py  					  	# train by algorithm 2
+python multi_task_eval.py configs/graftnet_seg.py --out out.json	# train by algorithm 2
+```
+
