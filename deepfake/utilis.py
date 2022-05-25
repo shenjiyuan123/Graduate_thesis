@@ -124,6 +124,22 @@ def init_model(cfg, mode='train', type='resnet', path=None, class_nums=3, writer
             else:
                 model.load_state_dict(torch.load(path))
             print("Complete loading the GraftNet model. Start evaluation...")
+        elif type == 'GraftNet_Seg':
+            model = GraftNet_Seg(          
+                num_classes=3,
+                img_width=cfg.img_size[0],
+                img_height=cfg.img_size[1],
+                feas_shape=28*28,
+                head_layers=8, 
+                LFS_window_size=10, 
+                LFS_M=6,
+                writer=writer
+            )
+            if cfg.multi_gpu:
+                model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(path).items()})
+            else:
+                model.load_state_dict(torch.load(path))
+            print("Complete loading the GraftNet_Seg model. Start evaluation...")
 
     print("--------------------------------------------------------------------------")
     print(model)
